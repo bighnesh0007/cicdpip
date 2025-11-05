@@ -1,0 +1,81 @@
+name: Mule CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  MAVEN_OPTS: -Xmx1024m
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+
+      - name: Build Mule application
+        env:
+          ANYPNT_USERNAME: ${{ secrets.ANYPNT_USERNAME }}
+          ANYPNT_PASSWORD: ${{ secrets.ANYPNT_PASSWORD }}
+        run: |
+          mvn -B clean package -s settings/settings.xml -DskipTests=false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mule-artifact
+          path: target/*.jar
+
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mule-artifact
+          path: target/
+
+      - name: Run MUnit Tests
+        env:
+          ANYPNT_USERNAME: ${{ secrets.ANYPNT_USERNAME }}
+          ANYPNT_PASSWORD: ${{ secrets.ANYPNT_PASSWORD }}
+        run: |
+          mvn -B test -s settings/settings.xml
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish to Exchange
+        env:
+          ANYPNT_USERNAME: ${{ secrets.ANYPNT_USERNAME }}
+          ANYPNT_PASSWORD: ${{ secrets.ANYPNT_PASSWORD }}
+        run: |
+          mvn -B deploy -s settings/settings.xml -DskipTests=true \
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: publish
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to CloudHub
+        env:
+          ANYPNT_USERNAME: ${{ secrets.ANYPNT_USERNAME }}
+          ANYPNT_PASSWORD: ${{ secrets.ANYPNT_PASSWORD }}
+        run: |
+          mvn -B mule:deploy -s settings/settings.xml \
+            -Denvironment=Sandbox \
+            -DtargetName="Cloudhub-US-East-2" \
+            -DappName="cc-cicd-v1-dev"
